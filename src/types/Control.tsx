@@ -49,6 +49,7 @@ export interface PageHints {
 
 export interface ElementAction {
     hint: string;
-    action_type: string;
+    action_type: string; // "click", "hover", "focus", "right_click", "fill", "set_value"
     modifier_keys?: string[];
+    value?: string; // For fill/set_value operations
 }

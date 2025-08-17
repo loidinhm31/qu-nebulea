@@ -100,10 +100,40 @@ export default function VimiumShow({chromeSession, isProcessing, setResult, setI
             return '📝';
         }
         if (element.tag_name === 'select') return '📋';
-        if (element.tag_name === 'textarea') return '📝';
+        if (element.tag_name === 'textarea') return '📄';
         return '🎯';
     };
 
+    const isTextInputElement = (element: PageElement): boolean => {
+        return (element.tag_name === 'input' || element.tag_name === 'textarea') &&
+            (!element.element_type ||
+                ['text', 'email', 'password', 'search', 'url', 'tel', 'number', 'none'].includes(element.element_type));
+    };
+
+    const getElementStats = () => {
+        if (!pageHints) return { total: 0, links: 0, buttons: 0, inputs: 0, textInputs: 0 };
+
+        const stats = {
+            total: pageHints.elements.length,
+            links: 0,
+            buttons: 0,
+            inputs: 0,
+            textInputs: 0
+        };
+
+        pageHints.elements.forEach(el => {
+            if (el.tag_name === 'a') stats.links++;
+            else if (el.tag_name === 'button') stats.buttons++;
+            else if (el.tag_name === 'input' || el.tag_name === 'textarea') {
+                stats.inputs++;
+                if (isTextInputElement(el)) stats.textInputs++;
+            }
+        });
+
+        return stats;
+    };
+
+    const stats = getElementStats();
 
     return (<>
         <div
@@ -138,10 +168,24 @@ export default function VimiumShow({chromeSession, isProcessing, setResult, setI
 
                     {pageHints && (
                         <div
-                            className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                            className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800 space-y-2">
                             <p className="text-sm text-purple-700 dark:text-purple-300">
                                 Found {pageHints.visible_count} interactive elements
                             </p>
+                            <div className="flex flex-wrap gap-2 text-xs">
+                                <span className="vimium-stats-badge primary">
+                                    📝 {stats.textInputs} Fillable
+                                </span>
+                                <span className="vimium-stats-badge primary">
+                                    🔗 {stats.links} Links
+                                </span>
+                                <span className="vimium-stats-badge primary">
+                                    🔘 {stats.buttons} Buttons
+                                </span>
+                                <span className="vimium-stats-badge primary">
+                                    📋 {stats.inputs} Inputs
+                                </span>
+                            </div>
                             <p className="text-xs text-purple-600 dark:text-purple-400">
                                 Total: {pageHints.total_count} elements detected
                             </p>
@@ -169,15 +213,14 @@ export default function VimiumShow({chromeSession, isProcessing, setResult, setI
                         Interactive Elements ({getFilteredElements().length} of {pageHints.elements.length})
                     </h4>
 
-                    <div className="max-h-96 overflow-y-auto space-y-2">
+                    <div className="vimium-elements-list max-h-96 overflow-y-auto space-y-2">
                         {getFilteredElements().map((element, index) => (
                             <div
                                 key={index}
-                                className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
-                                    selectedHint === element.hint
-                                        ? 'bg-purple-100 dark:bg-purple-900/40 border-purple-300 dark:border-purple-600'
-                                        : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                className={`vimium-element-card ${
+                                    selectedHint === element.hint ? 'selected' : 'unselected'
                                 }`}
+                                data-element-type={element.tag_name === 'input' || element.tag_name === 'textarea' ? 'input' : element.tag_name}
                                 onClick={() => {
                                     setSelectedHint(element.hint);
                                     setHintFilter(element.hint);
@@ -185,29 +228,33 @@ export default function VimiumShow({chromeSession, isProcessing, setResult, setI
                             >
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-center gap-3">
-                                        <span className="text-2xl">{getElementTypeIcon(element)}</span>
-                                        <div>
+                                        <span className="vimium-element-type-icon">{getElementTypeIcon(element)}</span>
+                                        <div className="vimium-element-info">
                                             <div className="flex items-center gap-2">
-                                                            <span
-                                                                className="font-mono font-bold text-lg text-purple-600 dark:text-purple-400">
-                                                                {element.hint.toUpperCase()}
-                                                            </span>
-                                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                                                {element.tag_name}
+                                                <span className="vimium-element-hint text-purple-600 dark:text-purple-400">
+                                                    {element.hint.toUpperCase()}
+                                                </span>
+                                                <span className="vimium-element-meta">
+                                                    {element.tag_name}
                                                     {element.element_type !== 'none' && ` (${element.element_type})`}
-                                                            </span>
+                                                    {isTextInputElement(element) && (
+                                                        <span className="ml-2 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-xs rounded-full">
+                                                            Fillable
+                                                        </span>
+                                                    )}
+                                                </span>
                                             </div>
-                                            <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+                                            <p className="vimium-element-text">
                                                 {element.text || element.href || 'No text content'}
                                             </p>
                                             {element.href && (
-                                                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                <p className="vimium-element-url">
                                                     → {element.href}
                                                 </p>
                                             )}
                                         </div>
                                     </div>
-                                    <div className="text-right text-xs text-gray-500 dark:text-gray-400">
+                                    <div className="vimium-element-position">
                                         <div>({Math.round(element.x)}, {Math.round(element.y)})</div>
                                         <div>{Math.round(element.width)}×{Math.round(element.height)}</div>
                                     </div>
@@ -233,7 +280,7 @@ export default function VimiumShow({chromeSession, isProcessing, setResult, setI
                     <div className="flex flex-wrap gap-2">
                         <button
                             onClick={() => setHintFilter("a")}
-                            className="text-sm px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                            className="vimium-quick-action bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/60"
                         >
                             First Link (a)
                         </button>
@@ -242,20 +289,41 @@ export default function VimiumShow({chromeSession, isProcessing, setResult, setI
                                 const buttons = getFilteredElements().filter(el => el.tag_name === 'button');
                                 if (buttons.length > 0) setHintFilter(buttons[0].hint);
                             }}
-                            className="text-sm px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                            className="vimium-quick-action bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/60"
                         >
                             First Button
                         </button>
                         <button
                             onClick={() => {
-                                const inputs = getFilteredElements().filter(el => el.tag_name === 'input');
+                                const inputs = getFilteredElements().filter(el => isTextInputElement(el));
                                 if (inputs.length > 0) setHintFilter(inputs[0].hint);
                             }}
-                            className="text-sm px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                            className="vimium-quick-action bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60"
+                        >
+                            📝 First Text Input
+                        </button>
+                        <button
+                            onClick={() => {
+                                const allInputs = getFilteredElements().filter(el => el.tag_name === 'input' || el.tag_name === 'textarea');
+                                if (allInputs.length > 0) setHintFilter(allInputs[0].hint);
+                            }}
+                            className="vimium-quick-action bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60"
                         >
                             First Input
                         </button>
                     </div>
+                </div>
+            )}
+
+            {/* Help Text */}
+            {hintsVisible && stats.textInputs > 0 && (
+                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <h5 className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                        💡 Text Input Help
+                    </h5>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">
+                        Elements marked "Fillable" can be automatically filled with text. Select one and choose "Fill Text" action to enter custom text.
+                    </p>
                 </div>
             )}
         </div>
