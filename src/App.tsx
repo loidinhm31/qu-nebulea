@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
@@ -31,6 +31,32 @@ interface ChromeSession {
     session_id: string;
 }
 
+interface PageElement {
+    hint: string;
+    tag_name: string;
+    element_type: string;
+    text: string;
+    href?: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    visible: boolean;
+    selector: string;
+}
+
+interface PageHints {
+    elements: PageElement[];
+    total_count: number;
+    visible_count: number;
+}
+
+interface ElementAction {
+    hint: string;
+    action_type: string;
+    modifier_keys?: string[];
+}
+
 function App() {
     const [command, setCommand] = useState("");
     const [result, setResult] = useState<CommandResponse | null>(null);
@@ -48,9 +74,26 @@ function App() {
     const [chromeTargets, setChromeTargets] = useState<ChromeTarget[]>([]);
     const [selectedTargetId, setSelectedTargetId] = useState<string>("");
 
+    // Vimium-like navigation states
+    const [pageHints, setPageHints] = useState<PageHints | null>(null);
+    const [hintsVisible, setHintsVisible] = useState(false);
+    const [selectedHint, setSelectedHint] = useState<string>("");
+    const [hintFilter, setHintFilter] = useState<string>("");
+    const [selectedActionType, setSelectedActionType] = useState<string>("click");
+    const [vimiumMode, setVimiumMode] = useState<string>("normal"); // normal, hint_selection, action_selection
+
+    const hintInputRef = useRef<HTMLInputElement>(null);
+
     useEffect(() => {
         loadChromeProfiles();
     }, []);
+
+    // Focus hint input when entering hint selection mode
+    useEffect(() => {
+        if (vimiumMode === "hint_selection" && hintInputRef.current) {
+            hintInputRef.current.focus();
+        }
+    }, [vimiumMode]);
 
     const loadChromeProfiles = async () => {
         try {
@@ -68,23 +111,18 @@ function App() {
         setResult(null);
 
         try {
-            // First parse the command
             const parsedCommand: ParsedCommand = await invoke("parse_command", {
                 input: command
             });
 
-            console.log("Parsed command:", parsedCommand);
-
-            // Then execute it
             const response: CommandResponse = await invoke("execute_os_command", {
                 parsedCommand
             });
 
             setResult(response);
 
-            // Add to history if successful
             if (response.success) {
-                setCommandHistory(prev => [command, ...prev.slice(0, 9)]); // Keep last 10 commands
+                setCommandHistory(prev => [command, ...prev.slice(0, 9)]);
             }
 
         } catch (error) {
@@ -99,7 +137,6 @@ function App() {
 
     const executePresetCommand = async (presetCommand: string) => {
         setCommand(presetCommand);
-
         setIsProcessing(true);
         setResult(null);
 
@@ -130,8 +167,8 @@ function App() {
 
     const openChromeWithControl = async () => {
         setIsProcessing(true);
-        setDebugInfo(""); // Clear previous debug info
-        setChromeTargets([]); // Clear previous targets
+        setDebugInfo("");
+        setChromeTargets([]);
         try {
             const options: ChromeControlOptions = {
                 profile: selectedProfile !== "Default" ? selectedProfile : undefined,
@@ -146,7 +183,6 @@ function App() {
                 message: `Chrome opened with control enabled. Session ID: ${session.session_id}, Port: ${session.debug_port}`
             });
 
-            // Load targets after successful connection
             setTimeout(async () => {
                 await loadChromeTargets();
             }, 1000);
@@ -203,8 +239,6 @@ function App() {
                 sessionId: chromeSession.session_id
             });
             setDebugInfo(info);
-
-            // Also load current targets
             await loadChromeTargets();
         } catch (error) {
             setDebugInfo(`Debug info failed: ${error}`);
@@ -225,7 +259,6 @@ function App() {
             });
             setChromeTargets(targets);
 
-            // Auto-select first page target if none selected
             if (!selectedTargetId && targets.length > 0) {
                 const pageTarget = targets.find(t => t.target_type === "page" && !t.url.startsWith("chrome-extension://"));
                 if (pageTarget) {
@@ -253,6 +286,149 @@ function App() {
         }
     };
 
+    // Vimium-like navigation functions
+    const showPageHints = async () => {
+        if (!chromeSession) {
+            setResult({
+                success: false,
+                message: "No active Chrome session. Please open Chrome with control first."
+            });
+            return;
+        }
+
+        setIsProcessing(true);
+        try {
+            const hints: PageHints = await invoke("chrome_show_page_hints", {
+                sessionId: chromeSession.session_id
+            });
+            setPageHints(hints);
+            setHintsVisible(true);
+            setVimiumMode("hint_selection");
+            setHintFilter("");
+            setResult({
+                success: true,
+                message: `Found ${hints.visible_count} interactive elements on the page`
+            });
+        } catch (error) {
+            setResult({
+                success: false,
+                message: `Failed to show page hints: ${error}`
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const clearPageHints = async () => {
+        if (!chromeSession) return;
+
+        setIsProcessing(true);
+        try {
+            await invoke("chrome_clear_page_hints", {
+                sessionId: chromeSession.session_id
+            });
+            setPageHints(null);
+            setHintsVisible(false);
+            setVimiumMode("normal");
+            setHintFilter("");
+            setSelectedHint("");
+            setResult({
+                success: true,
+                message: "Page hints cleared"
+            });
+        } catch (error) {
+            setResult({
+                success: false,
+                message: `Failed to clear hints: ${error}`
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const interactWithElement = async (hint: string, actionType: string = selectedActionType) => {
+        if (!chromeSession) return;
+
+        setIsProcessing(true);
+        try {
+            const action: ElementAction = {
+                hint: hint,
+                action_type: actionType
+            };
+
+            const result: string = await invoke("chrome_interact_with_element", {
+                sessionId: chromeSession.session_id,
+                action: action
+            });
+
+            setResult({
+                success: true,
+                message: `Performed ${actionType} on element ${hint}: ${result}`
+            });
+
+            // Clear hints after successful interaction
+            setTimeout(() => {
+                clearPageHints();
+            }, 1000);
+
+        } catch (error) {
+            setResult({
+                success: false,
+                message: `Failed to interact with element: ${error}`
+            });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleHintKeyPress = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && selectedHint) {
+            interactWithElement(selectedHint);
+        } else if (e.key === 'Escape') {
+            clearPageHints();
+        }
+    };
+
+    const handleHintFilterChange = (value: string) => {
+        setHintFilter(value.toLowerCase());
+
+        // Auto-select if only one hint matches
+        const matchingHints = getFilteredElements().map(el => el.hint);
+        if (matchingHints.length === 1) {
+            setSelectedHint(matchingHints[0]);
+        } else if (matchingHints.includes(value.toLowerCase())) {
+            setSelectedHint(value.toLowerCase());
+        } else {
+            setSelectedHint("");
+        }
+    };
+
+    const getFilteredElements = (): PageElement[] => {
+        if (!pageHints) return [];
+
+        if (!hintFilter) return pageHints.elements;
+
+        return pageHints.elements.filter(el =>
+            el.hint.toLowerCase().startsWith(hintFilter.toLowerCase()) ||
+            el.text.toLowerCase().includes(hintFilter.toLowerCase()) ||
+            el.tag_name.toLowerCase().includes(hintFilter.toLowerCase())
+        );
+    };
+
+    const getElementTypeIcon = (element: PageElement): string => {
+        if (element.tag_name === 'a') return '🔗';
+        if (element.tag_name === 'button') return '🔘';
+        if (element.tag_name === 'input') {
+            if (element.element_type === 'submit') return '✅';
+            if (element.element_type === 'checkbox') return '☑️';
+            if (element.element_type === 'radio') return '🔘';
+            return '📝';
+        }
+        if (element.tag_name === 'select') return '📋';
+        if (element.tag_name === 'textarea') return '📝';
+        return '🎯';
+    };
+
     return (
         <main className="min-h-screen p-4 lg:p-8">
             <div className="max-w-6xl mx-auto space-y-8">
@@ -262,9 +438,205 @@ function App() {
                         OS & Chrome Control Center
                     </h1>
                     <p className="text-xl text-gray-600 dark:text-gray-400">
-                        Control your system and Chrome browser with advanced WebSocket capabilities
+                        Control your system and Chrome browser with Vimium-like navigation
                     </p>
                 </div>
+
+                {/* Vimium Navigation Section */}
+                {chromeSession && (
+                    <div className="card p-6 lg:p-8 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20">
+                        <h2 className="text-2xl font-bold mb-6 text-purple-700 dark:text-purple-300">
+                            🎯 Vimium-like Page Navigation
+                        </h2>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Hint Control */}
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                                    Page Element Detection
+                                </h3>
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={showPageHints}
+                                        disabled={isProcessing || hintsVisible}
+                                        className="btn-primary flex-1"
+                                    >
+                                        {hintsVisible ? "Hints Active ✨" : "Show Page Hints"}
+                                    </button>
+                                    <button
+                                        onClick={clearPageHints}
+                                        disabled={isProcessing || !hintsVisible}
+                                        className="btn-secondary"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+
+                                {pageHints && (
+                                    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                                        <p className="text-sm text-purple-700 dark:text-purple-300">
+                                            Found {pageHints.visible_count} interactive elements
+                                        </p>
+                                        <p className="text-xs text-purple-600 dark:text-purple-400">
+                                            Total: {pageHints.total_count} elements detected
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Hint Selection */}
+                            {hintsVisible && (
+                                <div className="space-y-4">
+                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                                        Element Selection
+                                    </h3>
+
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                Filter/Select Hint
+                                            </label>
+                                            <input
+                                                ref={hintInputRef}
+                                                type="text"
+                                                value={hintFilter}
+                                                onChange={(e) => handleHintFilterChange(e.target.value)}
+                                                onKeyPress={handleHintKeyPress}
+                                                className="input-primary"
+                                                placeholder="Type hint (e.g., 'a', 'b') or search text..."
+                                                disabled={isProcessing}
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                Action Type
+                                            </label>
+                                            <select
+                                                value={selectedActionType}
+                                                onChange={(e) => setSelectedActionType(e.target.value)}
+                                                className="input-primary"
+                                                disabled={isProcessing}
+                                            >
+                                                <option value="click">Click</option>
+                                                <option value="right_click">Right Click</option>
+                                                <option value="hover">Hover</option>
+                                                <option value="focus">Focus</option>
+                                            </select>
+                                        </div>
+
+                                        {selectedHint && (
+                                            <button
+                                                onClick={() => interactWithElement(selectedHint)}
+                                                disabled={isProcessing}
+                                                className="btn-primary w-full"
+                                            >
+                                                {selectedActionType.charAt(0).toUpperCase() + selectedActionType.slice(1).replace('_', ' ')} Element "{selectedHint.toUpperCase()}"
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Elements List */}
+                        {hintsVisible && pageHints && (
+                            <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-600">
+                                <h4 className="text-md font-semibold text-gray-800 dark:text-gray-200 mb-3">
+                                    Interactive Elements ({getFilteredElements().length} of {pageHints.elements.length})
+                                </h4>
+
+                                <div className="max-h-96 overflow-y-auto space-y-2">
+                                    {getFilteredElements().map((element, index) => (
+                                        <div
+                                            key={index}
+                                            className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                                                selectedHint === element.hint
+                                                    ? 'bg-purple-100 dark:bg-purple-900/40 border-purple-300 dark:border-purple-600'
+                                                    : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                            }`}
+                                            onClick={() => {
+                                                setSelectedHint(element.hint);
+                                                setHintFilter(element.hint);
+                                            }}
+                                        >
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-2xl">{getElementTypeIcon(element)}</span>
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-mono font-bold text-lg text-purple-600 dark:text-purple-400">
+                                                                {element.hint.toUpperCase()}
+                                                            </span>
+                                                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                                                                {element.tag_name}
+                                                                {element.element_type !== 'none' && ` (${element.element_type})`}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+                                                            {element.text || element.href || 'No text content'}
+                                                        </p>
+                                                        {element.href && (
+                                                            <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                                → {element.href}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right text-xs text-gray-500 dark:text-gray-400">
+                                                    <div>({Math.round(element.x)}, {Math.round(element.y)})</div>
+                                                    <div>{Math.round(element.width)}×{Math.round(element.height)}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {getFilteredElements().length === 0 && hintFilter && (
+                                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                                        No elements match "{hintFilter}"
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Quick Actions */}
+                        {hintsVisible && (
+                            <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-600">
+                                <h4 className="text-md font-semibold text-gray-800 dark:text-gray-200 mb-3">
+                                    Quick Actions
+                                </h4>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        onClick={() => setHintFilter("a")}
+                                        className="text-sm px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                                    >
+                                        First Link (a)
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const buttons = getFilteredElements().filter(el => el.tag_name === 'button');
+                                            if (buttons.length > 0) setHintFilter(buttons[0].hint);
+                                        }}
+                                        className="text-sm px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                                    >
+                                        First Button
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const inputs = getFilteredElements().filter(el => el.tag_name === 'input');
+                                            if (inputs.length > 0) setHintFilter(inputs[0].hint);
+                                        }}
+                                        className="text-sm px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60"
+                                    >
+                                        First Input
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Chrome Control Section */}
                 <div className="card p-6 lg:p-8 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20">
@@ -646,34 +1018,34 @@ function App() {
                 {/* Help Section */}
                 <div className="card p-6 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 border-2 border-dashed border-gray-300 dark:border-gray-600">
                     <h3 className="text-xl font-semibold mb-6 text-gray-800 dark:text-gray-200">
-                        Direct Chrome DevTools Protocol Integration
+                        Vimium-like Navigation & Chrome DevTools Integration
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-3">
                             <h4 className="font-semibold text-gray-700 dark:text-gray-300">
-                                ✨ WebSocket CDP Features:
+                                ✨ Vimium Features:
                             </h4>
                             <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                                <li>• Direct WebSocket connection to Chrome targets</li>
-                                <li>• Real-time script execution via Runtime.evaluate</li>
-                                <li>• Page navigation via Page.navigate</li>
-                                <li>• Target-specific operations</li>
-                                <li>• Full Chrome DevTools Protocol support</li>
-                                <li>• No dependency on third-party libraries</li>
-                                <li>• Connection testing and diagnostics</li>
+                                <li>• Visual hint overlays on interactive elements</li>
+                                <li>• Keyboard navigation with hint letters</li>
+                                <li>• Click, right-click, hover, and focus actions</li>
+                                <li>• Real-time element filtering and search</li>
+                                <li>• Smart element detection (links, buttons, inputs)</li>
+                                <li>• Visual element positioning and sizing info</li>
+                                <li>• Quick actions for common element types</li>
                             </ul>
                         </div>
                         <div className="space-y-3">
                             <h4 className="font-semibold text-gray-700 dark:text-gray-300">
-                                🔧 How it works:
+                                🔧 How to use:
                             </h4>
                             <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                                <li>• Connects to ws://127.0.0.1:9222/devtools/page/id</li>
-                                <li>• Sends CDP messages in JSON format</li>
-                                <li>• Each message has unique ID for response tracking</li>
-                                <li>• Real-time bidirectional communication</li>
-                                <li>• Automatic target discovery and selection</li>
-                                <li>• Error handling and timeout management</li>
+                                <li>• Click "Show Page Hints" to scan for elements</li>
+                                <li>• Type hint letters (a, b, c...) to select elements</li>
+                                <li>• Use search to filter by text content</li>
+                                <li>• Choose action type before clicking elements</li>
+                                <li>• Press Enter to interact with selected element</li>
+                                <li>• Press Escape to clear hints and exit</li>
                             </ul>
                         </div>
                     </div>
