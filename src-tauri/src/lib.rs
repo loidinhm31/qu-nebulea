@@ -1,4 +1,5 @@
 mod chromium;
+mod voice;
 
 use crate::chromium::lib::{
     chrome_debug_info, chrome_execute_script, chrome_get_targets, open_chrome_with_control,
@@ -11,6 +12,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
+use voice::{transcribe_audio, execute_voice_command};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CommandResponse {
@@ -234,7 +236,9 @@ pub fn run() {
             chrome_get_targets,
             chrome_show_page_hints,
             chrome_clear_page_hints,
-            chrome_interact_with_element
+            chrome_interact_with_element,
+            transcribe_audio,        // Add this line
+            execute_voice_command    // Add this line
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

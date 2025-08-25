@@ -1,9 +1,10 @@
 import {useState} from "react";
 import {invoke} from "@tauri-apps/api/core";
 import "./App.css";
-import {CommandResponse, ParsedCommand} from "./types/Control.tsx";
+import {ChromeSession, CommandResponse, ParsedCommand} from "./types/Control.tsx";
 import PresetCommands from "./components/PresetCommands.tsx";
 import ChromeControl from "./components/ChromeControl.tsx";
+import VoiceControl from "./components/VoiceControl.tsx";
 
 
 function App() {
@@ -11,6 +12,7 @@ function App() {
     const [result, setResult] = useState<CommandResponse | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [commandHistory, setCommandHistory] = useState<string[]>([]);
+    const [chromeSession, setChromeSession] = useState<ChromeSession | null>(null);
 
     const executeCommand = async () => {
         if (!command.trim()) return;
@@ -68,14 +70,27 @@ function App() {
                         OS & Chrome Control Center
                     </h1>
                     <p className="text-xl text-gray-600 dark:text-gray-400">
-                        Control your system and Chrome browser with Vimium-like navigation
+                        Control your system and Chrome browser with Vimium-like navigation and voice commands
                     </p>
                 </div>
 
+                {/* Voice Control Section */}
+                <VoiceControl
+                    isProcessing={isProcessing}
+                    setIsProcessing={setIsProcessing}
+                    setResult={setResult}
+                    setCommand={setCommand}
+                    setCommandHistory={setCommandHistory}
+                    chromeSession={chromeSession} // Pass the chrome session
+                />
 
                 {/* Chrome Control Section */}
-                <ChromeControl isProcessing={isProcessing} setIsProcessing={setIsProcessing}
-                               setResult={setResult}/>
+                <ChromeControl
+                    isProcessing={isProcessing}
+                    setIsProcessing={setIsProcessing}
+                    setResult={setResult}
+                    setChromeSession={setChromeSession} // Add this prop
+                />
 
                 {/* Command Input Section */}
                 <div className="card p-6 lg:p-8">
@@ -90,7 +105,7 @@ function App() {
                             className="input-primary flex-1"
                             value={command}
                             onChange={(e) => setCommand(e.currentTarget.value)}
-                            placeholder="Enter command (e.g., 'Open Chrome', 'Open Firefox')"
+                            placeholder="Enter command (e.g., 'Open Chrome', 'Open Firefox') or use voice control above"
                             disabled={isProcessing}
                         />
                         <button

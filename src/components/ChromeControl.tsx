@@ -8,10 +8,11 @@ interface ChromeControlProps {
     isProcessing: boolean;
     setIsProcessing: (isProcessing: boolean) => void;
     setResult: (value: CommandResponse | null) => void;
+    setChromeSession: (session: ChromeSession | null) => void;
 }
 
-export default function ChromeControl({isProcessing, setIsProcessing, setResult}: ChromeControlProps) {
-    const [chromeSession, setChromeSession] = useState<ChromeSession | null>(null);
+export default function ChromeControl({isProcessing, setIsProcessing, setResult, setChromeSession}: ChromeControlProps) {
+    const [chromeSession, setChromeSessionLocal] = useState<ChromeSession | null>(null);
     const [profiles, setProfiles] = useState<string[]>([]);
     const [selectedProfile, setSelectedProfile] = useState<string>("Default");
     const [navigationUrl, setNavigationUrl] = useState<string>("https://www.google.com");
@@ -24,6 +25,12 @@ export default function ChromeControl({isProcessing, setIsProcessing, setResult}
     useEffect(() => {
         loadChromeProfiles();
     }, []);
+
+    // Update parent component when chrome session changes
+    const updateChromeSession = (session: ChromeSession | null) => {
+        setChromeSessionLocal(session);
+        setChromeSession(session);
+    };
 
     const loadChromeProfiles = async () => {
         try {
@@ -46,7 +53,7 @@ export default function ChromeControl({isProcessing, setIsProcessing, setResult}
             };
 
             const session: ChromeSession = await invoke("open_chrome_with_control", {options});
-            setChromeSession(session);
+            updateChromeSession(session);
             setResult({
                 success: true,
                 message: `Chrome opened with control enabled. Session ID: ${session.session_id}, Port: ${session.debug_port}`
@@ -140,6 +147,18 @@ export default function ChromeControl({isProcessing, setIsProcessing, setResult}
         }
     };
 
+    const closeChromeSession = () => {
+        updateChromeSession(null);
+        setChromeTargets([]);
+        setSelectedTargetId("");
+        setDebugInfo("");
+        setScriptResult("");
+        setResult({
+            success: true,
+            message: "Chrome session closed"
+        });
+    };
+
     return (
         <div
             className="card p-6 lg:p-8 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20">
@@ -190,20 +209,29 @@ export default function ChromeControl({isProcessing, setIsProcessing, setResult}
                         <div className="grid grid-cols-1 gap-2">
                             <button
                                 onClick={openChromeWithControl}
-                                disabled={isProcessing}
+                                disabled={isProcessing || !!chromeSession}
                                 className="btn-primary"
                             >
                                 {chromeSession ? "Chrome Connected ✓" : "Open Chrome with Control"}
                             </button>
 
                             {chromeSession && (
-                                <button
-                                    onClick={getDebugInfo}
-                                    disabled={isProcessing}
-                                    className="btn-secondary"
-                                >
-                                    Debug Chrome Connection
-                                </button>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={getDebugInfo}
+                                        disabled={isProcessing}
+                                        className="btn-secondary"
+                                    >
+                                        Debug Connection
+                                    </button>
+                                    <button
+                                        onClick={closeChromeSession}
+                                        disabled={isProcessing}
+                                        className="btn-secondary bg-red-100 hover:bg-red-200 text-red-700"
+                                    >
+                                        Close Session
+                                    </button>
+                                </div>
                             )}
                         </div>
 
@@ -211,13 +239,16 @@ export default function ChromeControl({isProcessing, setIsProcessing, setResult}
                             <div
                                 className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
                                 <p className="text-sm text-green-700 dark:text-green-300">
-                                    Session: {chromeSession.session_id.substring(0, 8)}...
+                                    <span className="font-medium">Session:</span> {chromeSession.session_id.substring(0, 8)}...
                                 </p>
                                 <p className="text-sm text-green-700 dark:text-green-300">
-                                    Port: {chromeSession.debug_port}
+                                    <span className="font-medium">Port:</span> {chromeSession.debug_port}
                                 </p>
                                 <p className="text-sm text-green-700 dark:text-green-300">
-                                    Targets: {chromeTargets.length}
+                                    <span className="font-medium">Targets:</span> {chromeTargets.length}
+                                </p>
+                                <p className="text-sm text-green-700 dark:text-green-300">
+                                    <span className="font-medium">Voice Control:</span> Available ✓
                                 </p>
                             </div>
                         )}
@@ -325,6 +356,32 @@ export default function ChromeControl({isProcessing, setIsProcessing, setResult}
                     </button>
                 </div>
             </div>
+
+            {/* Voice Control Integration Notice */}
+            {chromeSession && (
+                <div className="mt-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                    <h4 className="text-md font-semibold text-purple-700 dark:text-purple-300 mb-2">
+                        🎤 Voice Control Available
+                    </h4>
+                    <p className="text-sm text-purple-600 dark:text-purple-400">
+                        Chrome session is now available for voice commands. Switch to Chrome or Vimium mode in the Voice Control section above to use advanced voice commands like:
+                    </p>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                        <div className="p-2 bg-purple-100 dark:bg-purple-900/40 rounded">
+                            "Show page hints"
+                        </div>
+                        <div className="p-2 bg-purple-100 dark:bg-purple-900/40 rounded">
+                            "Click A"
+                        </div>
+                        <div className="p-2 bg-purple-100 dark:bg-purple-900/40 rounded">
+                            "Navigate to google.com"
+                        </div>
+                        <div className="p-2 bg-purple-100 dark:bg-purple-900/40 rounded">
+                            "Scroll down"
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

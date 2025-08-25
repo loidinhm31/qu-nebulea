@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    qu_nebulea_lib::run()
+    alie_client_lib::run()
 }
