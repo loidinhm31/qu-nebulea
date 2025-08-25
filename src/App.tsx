@@ -70,7 +70,7 @@ function App() {
                         OS & Chrome Control Center
                     </h1>
                     <p className="text-xl text-gray-600 dark:text-gray-400">
-                        Control your system and Chrome browser with Vimium-like navigation and voice commands
+                        Control your system and Chrome browser with advanced voice commands and Vimium-like navigation
                     </p>
                 </div>
 
@@ -81,7 +81,7 @@ function App() {
                     setResult={setResult}
                     setCommand={setCommand}
                     setCommandHistory={setCommandHistory}
-                    chromeSession={chromeSession} // Pass the chrome session
+                    chromeSession={chromeSession}
                 />
 
                 {/* Chrome Control Section */}
@@ -89,7 +89,7 @@ function App() {
                     isProcessing={isProcessing}
                     setIsProcessing={setIsProcessing}
                     setResult={setResult}
-                    setChromeSession={setChromeSession} // Add this prop
+                    setChromeSession={setChromeSession}
                 />
 
                 {/* Command Input Section */}

@@ -8,7 +8,7 @@ interface ChromeControlProps {
     isProcessing: boolean;
     setIsProcessing: (isProcessing: boolean) => void;
     setResult: (value: CommandResponse | null) => void;
-    setChromeSession: (session: ChromeSession | null) => void;
+    setChromeSession: (session: ChromeSession | null) => void; // Add this line
 }
 
 export default function ChromeControl({isProcessing, setIsProcessing, setResult, setChromeSession}: ChromeControlProps) {

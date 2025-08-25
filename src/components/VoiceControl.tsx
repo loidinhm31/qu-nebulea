@@ -71,7 +71,7 @@ export default function VoiceControl({
     const wsRef = useRef<WebSocket | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
-    const processorRef = useRef<ScriptProcessorNode | null>(null);
+    const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
     const audioBufferRef = useRef<number[]>([]);
     const debugAudioDataRef = useRef<number[]>([]);
     const sessionIdRef = useRef<string | null>(null);
@@ -383,6 +383,9 @@ export default function VoiceControl({
         if (mediaStreamRef.current) {
             mediaStreamRef.current.getTracks().forEach(track => track.stop());
         }
+        if (audioWorkletNodeRef.current) {
+            audioWorkletNodeRef.current.disconnect();
+        }
         if (audioContextRef.current) {
             audioContextRef.current.close();
         }
@@ -394,6 +397,51 @@ export default function VoiceControl({
 
     const startRecording = () => {
         setIsRecording(true);
+    };
+
+    const createAudioWorkletProcessor = () => {
+        // Create the audio worklet processor code as a Blob URL
+        const processorCode = `
+            class AudioProcessorWorklet extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.bufferSize = 4096;
+                    this.buffer = new Float32Array(this.bufferSize);
+                    this.bufferIndex = 0;
+                }
+
+                process(inputs, outputs, parameters) {
+                    const input = inputs[0];
+                    if (input.length > 0) {
+                        const channelData = input[0];
+                        
+                        for (let i = 0; i < channelData.length; i++) {
+                            this.buffer[this.bufferIndex] = channelData[i];
+                            this.bufferIndex++;
+                            
+                            if (this.bufferIndex >= this.bufferSize) {
+                                // Send buffer to main thread
+                                this.port.postMessage({
+                                    type: 'audio-data',
+                                    audioData: new Float32Array(this.buffer)
+                                });
+                                
+                                // Reset buffer
+                                this.bufferIndex = 0;
+                                this.buffer.fill(0);
+                            }
+                        }
+                    }
+                    
+                    return true;
+                }
+            }
+
+            registerProcessor('audio-processor-worklet', AudioProcessorWorklet);
+        `;
+
+        const blob = new Blob([processorCode], { type: 'application/javascript' });
+        return URL.createObjectURL(blob);
     };
 
     const startAudioProcessing = async () => {
@@ -416,37 +464,94 @@ export default function VoiceControl({
                 sampleRate: sampleRate
             });
 
+            // Create and load the audio worklet processor
+            const processorUrl = createAudioWorkletProcessor();
+
+            try {
+                await audioContextRef.current.audioWorklet.addModule(processorUrl);
+                log('Audio worklet processor loaded successfully');
+            } catch (error) {
+                log(`Failed to load audio worklet: ${error}`, 'error');
+                // Fallback to a simpler approach using AnalyserNode
+                await startAudioProcessingFallback();
+                return;
+            }
+
             const source = audioContextRef.current.createMediaStreamSource(mediaStreamRef.current);
 
-            const bufferSize = 4096;
-            processorRef.current = audioContextRef.current.createScriptProcessor(bufferSize, 1, 1);
+            // Create AudioWorkletNode
+            audioWorkletNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'audio-processor-worklet');
 
-            processorRef.current.onaudioprocess = (event) => {
-                if (isRecording && !isProcessingAudioRef.current) {
-                    processAudioData(event.inputBuffer.getChannelData(0));
+            // Handle messages from the audio worklet processor
+            audioWorkletNodeRef.current.port.onmessage = (event) => {
+                if (event.data.type === 'audio-data') {
+                    if (isRecording && !isProcessingAudioRef.current) {
+                        processAudioData(event.data.audioData);
+                    }
                 }
             };
 
-            source.connect(processorRef.current);
-            processorRef.current.connect(audioContextRef.current.destination);
+            source.connect(audioWorkletNodeRef.current);
 
             hasSpeechInBufferRef.current = false;
             lastSpeechTimeRef.current = Date.now();
-            log('Recording started', 'success');
+            log('Recording started with AudioWorklet', 'success');
+
+            // Start sending audio chunks
+            startAudioChunking();
+
+            // Clean up the blob URL
+            URL.revokeObjectURL(processorUrl);
+        } catch (error) {
+            log(`Failed to start recording: ${error}`, 'error');
+        }
+    };
+
+    // Fallback method using AnalyserNode for browsers that don't support AudioWorklet
+    const startAudioProcessingFallback = async () => {
+        try {
+            log('Using AnalyserNode fallback for audio processing');
+
+            const source = audioContextRef.current!.createMediaStreamSource(mediaStreamRef.current!);
+            const analyser = audioContextRef.current!.createAnalyser();
+
+            analyser.fftSize = 4096;
+            const bufferLength = analyser.fftSize;
+            const dataArray = new Float32Array(bufferLength);
+
+            source.connect(analyser);
+
+            const processAudio = () => {
+                if (isRecording) {
+                    analyser.getFloatTimeDomainData(dataArray);
+
+                    if (!isProcessingAudioRef.current) {
+                        processAudioData(dataArray);
+                    }
+
+                    requestAnimationFrame(processAudio);
+                }
+            };
+
+            requestAnimationFrame(processAudio);
+
+            hasSpeechInBufferRef.current = false;
+            lastSpeechTimeRef.current = Date.now();
+            log('Recording started with AnalyserNode fallback', 'success');
 
             // Start sending audio chunks
             startAudioChunking();
         } catch (error) {
-            log(`Failed to start recording: ${error}`, 'error');
+            log(`Failed to start fallback audio processing: ${error}`, 'error');
         }
-    }
+    };
 
     const stopRecording = () => {
         setIsRecording(false);
 
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
+        if (audioWorkletNodeRef.current) {
+            audioWorkletNodeRef.current.disconnect();
+            audioWorkletNodeRef.current = null;
         }
 
         if (mediaStreamRef.current) {
