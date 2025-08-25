@@ -41,7 +41,6 @@ export default function VoiceControl({
                                      }: VoiceControlProps) {
     const [isConnected, setIsConnected] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
-    const [isSleeping, setIsSleeping] = useState(false);
 
     const [audioConfig, setAudioConfig] = useState<AudioConfig>({
         serverUrl: 'ws://localhost:3000/ws',
@@ -81,6 +80,7 @@ export default function VoiceControl({
     const latencySumRef = useRef<number>(0);
     const latencyCountRef = useRef<number>(0);
     const isProcessingAudioRef = useRef<boolean>(false);
+    const isSleepingRef = useRef<boolean>(false);
 
     const silenceDetectionBufferRef = useRef<number[]>([]);
     const silenceDetectionWindow = 10;
@@ -165,15 +165,15 @@ export default function VoiceControl({
     }, [audioConfig.silenceThreshold, audioConfig.autoCommitDelay, log]);
 
     const setSleeping = useCallback((sleeping: boolean) => {
-        if (isSleeping !== sleeping) {
-            setIsSleeping(sleeping);
+        if (isSleepingRef.current !== sleeping) {
+            isSleepingRef.current = sleeping;
             if (sleeping) {
                 log('Entering sleep mode due to prolonged silence');
             } else {
                 log('Waking up from sleep mode');
             }
         }
-    }, [isSleeping, log]);
+    }, [isSleepingRef.current, log]);
 
     const setProcessing = useCallback((processing: boolean) => {
         if (isProcessingAudioRef.current !== processing) {
@@ -213,7 +213,7 @@ export default function VoiceControl({
         updateVisualization(audioData);
 
         // Skip audio buffering if in sleep mode or processing mode
-        if (isSleeping || isProcessingAudioRef.current) {
+        if (isSleepingRef.current || isProcessingAudioRef.current) {
             return;
         }
 
@@ -231,7 +231,7 @@ export default function VoiceControl({
         // Update buffer size
         const bufferSizeSeconds = audioBufferRef.current.length / (audioConfig.audioQuality * 2);
         setAudioStats(prev => ({...prev, bufferSize: bufferSizeSeconds}));
-    }, [detectSilence, updateVisualization, isSleeping, isProcessingAudioRef.current, audioConfig.audioQuality]);
+    }, [detectSilence, updateVisualization, isSleepingRef.current, isProcessingAudioRef.current, audioConfig.audioQuality]);
 
     const handleServerMessage = useCallback((message: any) => {
         const startTime = Date.now();
@@ -477,14 +477,14 @@ export default function VoiceControl({
         const sendChunk = () => {
             if (isRecording) {
                 // Only send chunks if not processing and not sleeping (or if we have significant audio)
-                if (!isProcessingAudioRef.current && !isSleeping && audioBufferRef.current.length >= samplesPerChunk) {
+                if (!isProcessingAudioRef.current && !isSleepingRef.current && audioBufferRef.current.length >= samplesPerChunk) {
                     const chunk = audioBufferRef.current.splice(0, samplesPerChunk);
                     sendAudioChunk(chunk);
                 }
 
                 // Schedule next chunk with adaptive interval
                 let nextInterval = chunkIntervalMs;
-                if (isSleeping) {
+                if (isSleepingRef.current) {
                     nextInterval = Math.max(chunkIntervalMs * 4, 1000);
                 } else if (isProcessingAudioRef.current) {
                     nextInterval = Math.min(chunkIntervalMs, 100);
@@ -580,14 +580,14 @@ export default function VoiceControl({
 
     const AudioVisualizer = () => (
         <div className={`relative h-16 rounded-lg overflow-hidden transition-all duration-200 ${
-            isProcessingAudioRef.current ? 'bg-purple-600' : isSleeping ? 'bg-teal-600 opacity-60' : 'bg-gray-800'
+            isProcessingAudioRef.current ? 'bg-purple-600' : isSleepingRef.current ? 'bg-teal-600 opacity-60' : 'bg-gray-800'
         } ${isProcessingAudioRef.current ? 'animate-pulse' : ''}`}>
             {audioLevelHistoryRef.current.map((level, i) => (
                 <div
                     key={i}
                     className={`absolute bottom-0 w-1 transition-all duration-100 rounded-t-sm ${
                         isProcessingAudioRef.current ? 'bg-gradient-to-t from-purple-400 to-purple-200' :
-                            isSleeping ? 'bg-gradient-to-t from-gray-600 to-gray-400' :
+                            isSleepingRef.current ? 'bg-gradient-to-t from-gray-600 to-gray-400' :
                                 'bg-gradient-to-t from-blue-500 to-blue-300'
                     }`}
                     style={{
@@ -601,14 +601,14 @@ export default function VoiceControl({
 
     const getRecordingStatus = () => {
         if (isProcessingAudioRef.current) return 'Processing';
-        if (isRecording && isSleeping) return 'Recording (Sleeping)';
+        if (isRecording && isSleepingRef.current) return 'Recording (Sleeping)';
         if (isRecording) return 'Recording';
         return 'Idle';
     };
 
     const getStatusIndicatorClass = () => {
         if (isProcessingAudioRef.current) return 'bg-purple-500';
-        if (isRecording && isSleeping) return 'bg-teal-500';
+        if (isRecording && isSleepingRef.current) return 'bg-teal-500';
         if (isRecording) return 'bg-orange-500';
         return 'bg-gray-400';
     };
@@ -789,7 +789,7 @@ export default function VoiceControl({
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">
                             Level: {(20 * Math.log10(audioLevel + 1e-10)).toFixed(1)}dB |
-                            Samples: {audioBufferRef.current.length} | {isSleeping ? 'Sleeping' : isProcessingAudioRef.current ? 'Processing' : 'Active'}
+                            Samples: {audioBufferRef.current.length} | {isSleepingRef.current ? 'Sleeping' : isProcessingAudioRef.current ? 'Processing' : 'Active'}
                             {silenceDetected && <span className="ml-2 text-teal-600">Silence detected</span>}
                         </div>
                     </div>
